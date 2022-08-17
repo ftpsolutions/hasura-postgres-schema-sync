@@ -1,0 +1,96 @@
+volumes:
+  postgres_data:
+  hasura_migrations:
+  hasura_metadata:
+
+services:
+  postgres:
+    restart: unless-stopped
+    build:
+      dockerfile: Dockerfile
+      context: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-Password1}
+      - POSTGRES_DB=${POSTGRES_DB:-some_database}
+
+  postgres-bootstrap:
+    restart: on-failure
+    build:
+      dockerfile: Dockerfile
+      context: postgres-bootstrap
+    environment:
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-Password1}
+      - POSTGRES_DB=${POSTGRES_DB:-some_database}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  hasura-bootstrap:
+    restart: on-failure
+    build:
+      dockerfile: Dockerfile
+      context: hasura-bootstrap
+    volumes:
+      - hasura_metadata:/hasura-metadata
+      - hasura_migrations:/hasura-migrations
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-some_database}
+
+  hasura:
+    restart: unless-stopped
+    build:
+      dockerfile: Dockerfile
+      context: hasura
+    volumes:
+      - hasura_metadata:/hasura-metadata
+      - hasura_migrations:/hasura-migrations
+    environment:
+      - HASURA_GRAPHQL_ENABLE_CONSOLE=true
+      - HASURA_GRAPHQL_ENABLE_TELEMETRY=false
+      - HASURA_GRAPHQL_DEV_MODE=true
+      - HASURA_GRAPHQL_DATABASE_URL=postgres://postgres:${POSTGRES_PASSWORD:-Password1}@postgres/${POSTGRES_DB:-some_database}
+      - HASURA_GRAPHQL_ADMIN_SECRET=${HASURA_GRAPHQL_ADMIN_SECRET:-Password1}
+      - POSTGRES_DB=${POSTGRES_DB:-some_database}
+    ports:
+      - 8080:8080/tcp
+    depends_on:
+      postgres-bootstrap:
+        condition: service_completed_successfully
+      hasura-bootstrap:
+        condition: service_completed_successfully
+
+  hasura-postgres-schema-sync:
+    restart: unless-stopped
+    build:
+      dockerfile: docker/hasura-postgres-schema-sync/Dockerfile
+      context: ../
+    environment:
+      - POSTGRES_SCHEMA=${POSTGRES_SCHEMA:-public}
+      - POSTGRES_HOST=${POSTGRES_HOST:-postgres}
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-Password1}
+      - POSTGRES_DB=${POSTGRES_DB:-some_database}
+      - HASURA_HOST=${HASURA_HOST:-hasura}
+      - HASURA_PORT=${HASURA_PORT:-8080}
+      - HASURA_USER=${HASURA_USER:-admin}
+      - HASURA_PASSWORD=${HASURA_PASSWORD:-Password1}
+    depends_on:
+      hasura:
+        condition: service_healthy
+
+  hasura-postgres-schema-sync-test:
+    restart: unless-stopped
+    build:
+      dockerfile: Dockerfile
+      context: hasura-postgres-schema-sync-test
+    environment:
+      - HASURA_HOST=${HASURA_HOST:-hasura}
+      - HASURA_PORT=${HASURA_PORT:-8080}
+      - HASURA_USER=${HASURA_USER:-admin}
+      - HASURA_PASSWORD=${HASURA_PASSWORD:-Password1}
+    depends_on:
+      hasura-postgres-schema-sync:
+        condition: service_healthy
